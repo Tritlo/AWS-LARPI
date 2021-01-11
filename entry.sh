@@ -1,6 +1,6 @@
 #!/bin/sh
 if [ -z "${AWS_LAMBDA_RUNTIME_API}" ]; then
-  exec /usr/bin/aws-lambda-rie "$@"
+  exec /usr/bin/aws-lambda-rie "/cabal-bins/$@"
 else
-  exec "$@"
+  exec "/cabal-bins/$@"
 fi

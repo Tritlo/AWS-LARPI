@@ -6,17 +6,23 @@ RUN apk add cabal wget
 RUN mkdir /cabal-build
 RUN mkdir /cabal-bins
 RUN cabal update
-ADD test/ .
+
+ARG PKG=test
+ARG EXE=test
+
+ADD $PKG/$PKG.cabal .
+RUN cabal build --builddir=/cabal-build --enable-static --enable-executable-static --only-dependencies $EXE
+ADD $PKG/ .
+
 RUN cabal install --builddir=/cabal-build --installdir=/cabal-bins --install-method=copy\
-    --enable-static --enable-executable-static test
+    --enable-static --enable-executable-static $EXE
 
 # copy artifacts to a clean image
 FROM alpine
 RUN apk add libffi gmp
-COPY --from=build /cabal-bins /cabal-bins
-
 ADD https://github.com/aws/aws-lambda-runtime-interface-emulator/releases/latest/download/aws-lambda-rie /usr/bin/aws-lambda-rie
 RUN chmod 755 /usr/bin/aws-lambda-rie
 COPY entry.sh /
 RUN chmod 755 /entry.sh
+COPY --from=build /cabal-bins /cabal-bins
 ENTRYPOINT [ "/entry.sh" ]
