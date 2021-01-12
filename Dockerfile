@@ -2,10 +2,12 @@ FROM frolvlad/alpine-ghc as build
 # install build tools
 # cache dependencies
 # build
-RUN apk add cabal wget
+RUN apk add cabal wget zlib zlib-dev
 RUN mkdir /cabal-build
 RUN mkdir /cabal-bins
 RUN cabal update
+RUN cabal install --global req warp
+
 
 ARG PKG=test
 ARG EXE=test
@@ -19,7 +21,7 @@ RUN cabal install --builddir=/cabal-build --installdir=/cabal-bins --install-met
 
 # copy artifacts to a clean image
 FROM alpine
-RUN apk add libffi gmp
+RUN apk add libffi gmp zlib zlib-dev
 ADD https://github.com/aws/aws-lambda-runtime-interface-emulator/releases/latest/download/aws-lambda-rie /usr/bin/aws-lambda-rie
 RUN chmod 755 /usr/bin/aws-lambda-rie
 COPY entry.sh /
