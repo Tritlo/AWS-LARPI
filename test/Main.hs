@@ -2,6 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
+{-# LANGUAGE RankNTypes #-}
 module Main where
 
 import System.Environment
@@ -11,6 +12,7 @@ import Text.URI
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Lazy as BL
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -105,12 +107,12 @@ nextInvocation Conf{..} = runReq defaultHttpConfig $ do
 
 
 
-data LambdaInterface =
-  LambdaInterface { li_handler :: LambdaInvocation
-                               -> IO (Either LambdaError ByteString)
-                  , li_init :: IO (Maybe LambdaError) }
+data LambdaInterface a =
+  LambdaInterface {
+      li_handler :: ToJSON a => LambdaInvocation -> IO (Either LambdaError a)
+    , li_init :: IO (Maybe LambdaError) }
 
-runLambdaInterface :: LambdaInterface -> IO ()
+runLambdaInterface :: ToJSON a => LambdaInterface a -> IO ()
 runLambdaInterface (LambdaInterface {..}) =
     do Just api <- fmap T.pack <$> lookupEnv "AWS_LAMBDA_RUNTIME_API"
        Just (c_base, c_opts) <- useHttpURI <$> mkURI ("http://" <> api)
@@ -124,14 +126,15 @@ runLambdaInterface (LambdaInterface {..}) =
           res <- handler li
           case res of
              Left lerr -> invocationError conf li_aws_request_id lerr
-             Right resp -> invocationResponse conf li_aws_request_id resp
+             Right resp -> invocationResponse conf li_aws_request_id
+                             (BL.toStrict $ encode resp)
           loop conf handler
 
 main :: IO ()
 main = do
   putStrLn "IT'S WORKING!"
   runLambdaInterface (LambdaInterface {
-                          li_handler = const (return $ Right "SUCCESS")
+                          li_handler = (\e -> print e >> return (Right ("LARPI" :: String)))
                         , li_init = return Nothing })
                                         
 
