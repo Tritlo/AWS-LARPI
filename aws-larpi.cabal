@@ -16,11 +16,16 @@ author:              Matthias Pall Gissurarson
 maintainer:          mpg@mpg.is
 -- copyright:
 category:            AWS
+homepage: https://github.com/Tritlo/AWS-LARPI
 build-type:          Simple
 extra-source-files:  CHANGELOG.md,
                      Dockerfile
 
 tested-with:         GHC == 8.8.3
+
+source-repository head
+  type: git
+  location: git://github.com/Tritlo/AWS-LARPI.git
 
 library
   hs-source-dirs: src/
