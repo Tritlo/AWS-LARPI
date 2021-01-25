@@ -8,13 +8,19 @@ RUN mkdir /cabal-bins
 RUN cabal update
 RUN cabal install --global req warp
 
+ADD aws-larpi.cabal .
+ADD LICENSE .
+ADD CHANGELOG.md .
+ADD src/ src/
+
+RUN cabal build --builddir=/cabal-build --enable-static --enable-executable-static aws-larpi
 
 ARG PKG=test
 ARG EXE=test
 
-ADD $PKG/$PKG.cabal .
+ADD $PKG/$PKG.cabal $PKG/
 RUN cabal build --builddir=/cabal-build --enable-static --enable-executable-static --only-dependencies $EXE
-ADD $PKG/ .
+ADD $PKG/ $PKG/
 
 RUN cabal install --builddir=/cabal-build --installdir=/cabal-bins --install-method=copy\
     --enable-static --enable-executable-static $EXE
