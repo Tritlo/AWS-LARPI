@@ -2,8 +2,18 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
-{-# LANGUAGE RankNTypes #-}
-module AWS.LARPI where
+{-# LANGUAGE RankNTypes, ExistentialQuantification #-}
+
+-- | The AWS.LARPI library defines the interface and the associated data types
+--   for running a Haskell program directly on AWS Lambda, and handles most of
+--   associated overheads, leaving the user free to focus on the functionality
+--   itself.
+module AWS.LARPI (
+    runLambdaInterface,
+
+    LambdaInterface(..), LambdaInvocation(..), LambdaError(..)
+
+) where
 
 
 import System.Environment
@@ -24,6 +34,8 @@ import Data.Maybe
 import Data.Aeson
 import GHC.Generics
 
+import Control.Monad (when)
+
 
 -- CONSTANTS
 version :: Text
@@ -39,20 +51,6 @@ errHeader = header "Lambda-Runtime-Function-Error-Type" "Unhandled"
 data Config = Conf { c_base :: Url 'Http
                    , c_opts :: Option 'Http }
 
-data LambdaError =
-  LambdaErr { errorMessage :: String
-            , errorType :: String }
-  deriving (Show, Generic, ToJSON)
-
-data LambdaInvocation =
-    LI { li_body :: ByteString
-       , li_aws_request_id :: Text
-       , li_deadline_ms :: Maybe ByteString
-       , li_invoked_function_arn :: Maybe ByteString
-       , li_trace_id :: Maybe ByteString
-       , li_client_context :: Maybe ByteString
-       , li_cognito_identity :: Maybe ByteString}
-  deriving (Show, Eq)
 
 
 invocationResponse :: Config -> Text -> ByteString -> IO ()
@@ -96,7 +94,7 @@ nextInvocation Conf{..} = runReq defaultHttpConfig $ do
              (c_opts <> responseTimeout maxBound)
   let rH = responseHeader res
 
-  return $ LI {
+  return $ LambdaInvocation {
       li_body = responseBody res
     , li_aws_request_id = fromJust $
                             T.decodeUtf8 <$> (rH "Lambda-Runtime-Aws-Request-Id")
@@ -106,12 +104,80 @@ nextInvocation Conf{..} = runReq defaultHttpConfig $ do
     , li_client_context = rH "Lambda-Runtime-Client-Context"
     , li_cognito_identity = rH "Lambda-Runtime-Cognito-Identity" }
 
+--- EXPORTS
 
-data LambdaInterface a =
+
+-- | A Lambda error consists of a message and an error type, both of which
+--   the user can define.
+data LambdaError =
+  LambdaErr { errorMessage :: String
+            , errorType :: String }
+  deriving (Show, Generic, ToJSON)
+
+-- | A Lambda invocaton contains the body of the request and a few headers
+--   defined by AWS. Only the AWS-Request-Id header is guaranteed to be defined.
+--   The headers are the following:
+--
+-- * li_aws_request_id – The request ID, which identifies the request that triggered
+-- the function invocation.
+--
+--     For example, 8476a536-e9f4-11e8-9739-2dfe598c3fcd.
+--
+-- * li_deadline_ms – The date that the function times out in Unix time milliseconds.
+--
+--     For example, 1542409706888.
+--
+-- * li_invoked_function_arn – The ARN of the Lambda function, version, or alias
+-- that's specified in the invocation.
+--
+--     For example, arn:aws:lambda:us-east-2:123456789012:function:custom-runtime.
+--
+-- * li_trace_id – The AWS X-Ray tracing
+--  header.
+--
+--     For example, Root=1-5bef4de7-ad49b0e87f6ef6c87fc2e700;Parent=9a9197af755a6419;Sampled=1.
+--
+-- * li_client_context – For invocations from the AWS Mobile SDK, data about the
+-- client application and device.
+--
+-- * li_cognito_identity – For invocations from the AWS Mobile SDK, data about the
+-- Amazon Cognito identity provider.
+data LambdaInvocation =
+    LambdaInvocation {
+         li_body :: ByteString
+       , li_aws_request_id :: Text
+       , li_deadline_ms :: Maybe ByteString
+       , li_invoked_function_arn :: Maybe ByteString
+       , li_trace_id :: Maybe ByteString
+       , li_client_context :: Maybe ByteString
+       , li_cognito_identity :: Maybe ByteString}
+  deriving (Show, Eq)
+
+
+-- | A Lambda interface consists of two functions:
+--
+--   The li_handler is the function that is run on every Lambda Invocation
+--   the results will be dumped as JSON, as this is what most AWS APIs
+--   expect. The first argument is the result of the li_init function, such
+--   as a database connection or an IORef or similar. Existentially
+--   quantified in the same manner as the ST monad to avoid the state
+--   escaping.
+--
+--   The li_init function is called at the start of the program to initialize
+--   the Lambda function, and some optional state. The state is then passed
+--   to the handler at each invocation, e.g. a database connection or similar.
+data LambdaInterface a = forall s.
   LambdaInterface {
-      li_handler :: ToJSON a => LambdaInvocation -> IO (Either LambdaError a)
-    , li_init :: IO (Maybe LambdaError) }
+      li_handler :: ToJSON a => s
+                             -> LambdaInvocation
+                             -> IO (Either LambdaError a)
+    , li_init :: IO  (Either LambdaError s)
+    }
 
+-- | The runLambdaInteface should be provided with the definition of the
+--   interface to run, and handles the interaction with the AWS API, such as the
+--   waiting for next request, responding to the right request, setting the
+--   X-Ray trace id and initializing the function at the start.
 runLambdaInterface :: ToJSON a => LambdaInterface a -> IO ()
 runLambdaInterface (LambdaInterface {..}) =
     do Just api <- fmap T.pack <$> lookupEnv "AWS_LAMBDA_RUNTIME_API"
@@ -119,14 +185,16 @@ runLambdaInterface (LambdaInterface {..}) =
        let conf = Conf{..}
        i_res <- li_init
        case i_res of
-          Just err -> initializationError conf err
-          _ -> loop conf li_handler
-  where loop conf handler  = do
-          li@LI{..} <- nextInvocation conf
-          res <- handler li
+          Left err -> initializationError conf err
+          Right init_state -> loop conf init_state li_handler
+  where loop conf init_state handler  = do
+          li@LambdaInvocation{..} <- nextInvocation conf
+          when (isJust li_trace_id) $
+            setEnv "_X_AMZN_TRACE_ID" $ B.unpack $ fromJust li_trace_id
+          res <- handler init_state li
           case res of
              Left lerr -> invocationError conf li_aws_request_id lerr
              Right resp -> invocationResponse conf li_aws_request_id
                              (BL.toStrict $ encode resp)
-          loop conf handler
+          loop conf init_state handler
 

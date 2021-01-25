@@ -4,17 +4,23 @@ cabal-version:       >=1.10
 
 name:                aws-larpi
 version:             0.1.0.0
--- synopsis:
--- description:
+synopsis:            Package Haskell functions for easy use on AWS Lambda.
+description:         The AWS LARPI package allows you to run Haskell code on AWS
+                     by defining a simple request handler for AWS Lambda requests, and then
+                     packaging it using the Dockerfile included. Uses the 
+                     <https://docs.aws.amazon.com/lambda/latest/dg/runtimes-api.html AWS Lambda runtime API>.
 -- bug-reports:
--- license:
+license:             MIT
 license-file:        LICENSE
 author:              Matthias Pall Gissurarson
 maintainer:          mpg@mpg.is
 -- copyright:
--- category:
+category:            AWS
 build-type:          Simple
-extra-source-files:  CHANGELOG.md
+extra-source-files:  CHANGELOG.md,
+                     Dockerfile
+
+tested-with:         GHC == 8.8.3
 
 library
   hs-source-dirs: src/
