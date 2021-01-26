@@ -12,7 +12,7 @@ description:         The AWS LARPI package allows you to run Haskell code on AWS
 -- bug-reports:
 license:             MIT
 license-file:        LICENSE
-author:              Matthias Pall Gissurarson
+author:              Matthías Páll Gissurarson
 maintainer:          mpg@mpg.is
 -- copyright:
 category:            AWS
